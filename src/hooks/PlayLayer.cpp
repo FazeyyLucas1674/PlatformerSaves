@@ -4,9 +4,8 @@
 #include "domain/CheckpointGameObjectReference.hpp"
 #include "hooks/PauseLayer.hpp"
 #include "hooks/FMODAudioEngine.hpp"
-#if !defined(GEODE_IS_IOS)
-#include <geode.custom-keybinds/include/Keybinds.hpp>
-#endif
+#include <Geode/loader/GameEvent.hpp>
+#include <Geode/loader/SettingV3.hpp>
 #include <util/algorithm.hpp>
 #include <util/filesystem.hpp>
 #include <util/platform.hpp>
@@ -14,20 +13,6 @@
 using namespace geode::prelude;
 using namespace persistenceAPI;
 using namespace util::platform;
-
-#if defined(GEODE_IS_WINDOWS)
-    #define UNIQUE_ID_OFFSET 0x69c158
-#elif defined(GEODE_IS_ANDROID64)
-    #define UNIQUE_ID_OFFSET 0x11fe018
-#elif defined(GEODE_IS_ANDROID32)
-    #define UNIQUE_ID_OFFSET 0xa9f00c
-#elif defined(GEODE_IS_ARM_MAC)
-    #define UNIQUE_ID_OFFSET 0x8aa39c
-#elif defined(GEODE_IS_INTEL_MAC)
-    #define UNIQUE_ID_OFFSET 0x985500
-#elif defined(GEODE_IS_IOS)
-    #define UNIQUE_ID_OFFSET 0x83f2e8
-#endif
 
 // Max PSF version is 31 cause after that bitfield is broken
 PSPlayLayer* s_currentPlayLayer = nullptr;
@@ -64,9 +49,7 @@ bool PSPlayLayer::init(GJGameLevel* i_level, bool i_useReplay, bool i_dontCreate
     if (m_fields->m_signalForAsyncLoad) {
         m_loadingProgress = 0.0f;
     }
-    #if !defined(GEODE_IS_IOS)
     setupKeybinds();
-    #endif
     setupSavingProgressCircleSprite();
     setupSavingSuccessSprite();
 
@@ -76,8 +59,10 @@ bool PSPlayLayer::init(GJGameLevel* i_level, bool i_useReplay, bool i_dontCreate
 void PSPlayLayer::processCreateObjectsFromSetup() {
     if (!m_fields->m_startedLoadingObjects) {
         m_fields->m_startedLoadingObjects = true;
-        *reinterpret_cast<int*>(geode::base::get()+UNIQUE_ID_OFFSET) = 12;
-        reinterpret_cast<persistenceAPI::PAPlayLayer*>(this)->m_fields->m_uniqueIDBase = *reinterpret_cast<int*>(geode::base::get()+UNIQUE_ID_OFFSET);
+        // 2.2081: no raw address needed, GameObject::resetMID() resets the unique ID global
+        // (same approach as PersistenceAPI v1.2.0). The counter restarts at 12.
+        GameObject::resetMID();
+        reinterpret_cast<persistenceAPI::PAPlayLayer*>(this)->m_fields->m_uniqueIDBase = 12;
     }
     PlayLayer::processCreateObjectsFromSetup();
 }
@@ -270,11 +255,11 @@ bool PSPlayLayer::validSaveExists() {
     return util::filesystem::validSaveExists(m_level);
 }
 
-#if !defined(GEODE_IS_IOS)
 void PSPlayLayer::setupKeybinds() {
-    addEventListener<keybinds::InvokeBindFilter>(
-        [this](keybinds::InvokeBindEvent* event) {
-            if (event->isDown() && canSave() && startSaveGame()) {
+    this->addEventListener(
+        KeybindSettingPressedEventV3(Mod::get(), "save-game-keybind"),
+        [this](Keybind const& i_keybind, bool i_down, bool i_repeat, double i_timestamp) {
+            if (i_down && !i_repeat && canSave() && startSaveGame()) {
                 PSPauseLayer* l_pauseLayer = static_cast<PSPauseLayer*>(CCScene::get()->getChildByID("PauseLayer"));
                 if (l_pauseLayer) {
                     if (l_pauseLayer->m_fields->m_saveCheckpointsSprite != nullptr) l_pauseLayer->m_fields->m_saveCheckpointsSprite->setColor({127,127,127});
@@ -282,12 +267,9 @@ void PSPlayLayer::setupKeybinds() {
                     if (l_pauseLayer->m_fields->m_saveCheckpointsButton != nullptr) l_pauseLayer->m_fields->m_saveCheckpointsButton->m_bEnabled = false;
                 }
             }
-            return ListenerResult::Propagate;
-        },
-        "save-game"_spr
+        }
     );
 }
-#endif
 
 void PSPlayLayer::setupSavingProgressCircleSprite() {
     CCSize l_winSize = CCDirector::sharedDirector()->getWinSize();
